@@ -7,17 +7,17 @@ class Face:
 
     def __init__(self):
         self.vertex = list()
-        self.normal = Vec3()
+        self.normal = np.array([0, 0, 0])
 
 
 class Object:
     __slots__ = 'filename', 'faces', 'mat', 'offset'
 
-    def __init__(self, f='', m=Material(), o=Vec3()):
+    def __init__(self, f='', m=Material(), o=[0, 0, 0]):
         self.filename = f
         self.faces = list()
         self.mat = m
-        self.offset = o
+        self.offset = np.array(o)
 
     def load_faces(self):
         # open obj file, load faces data
@@ -31,12 +31,17 @@ class Object:
             return None
 
         for line in file:
-            l = line.split(" ")  # split into ['x', 'float/vertex', 'float/vertex', 'float/vertex']
+            l = line.rstrip('\n')
+            l = l.split(" ")  # split into ['x', 'float/vertex', 'float/vertex', 'float/vertex']
+            l = [i for i in l if i]
+            if len(l) == 0:
+                continue
+
             if l[0] == "v":
-                vertex.append(Vec3(float(l[1]), float(l[2]), float(l[3])))
+                vertex.append([float(l[1]), float(l[2]), float(l[3])])
 
             if l[0] == "vn":
-                normals.append(Vec3(float(l[1]), float(l[2]), float(l[3])))
+                normals.append([float(l[1]), float(l[2]), float(l[3])])
 
             if l[0] == "f":
                 lp = l[1:]
@@ -63,8 +68,9 @@ class Object:
         ret = np.array([])
 
         for f in self.faces:
-            normal = Vec3()
-            if f.normal != Vec3():
+            normal = [0, 0, 0]
+            if not np.all(f.normal != np.array([0, 0, 0])):
+
                 normal = f.normal
 
             if len(f.vertex) == 3:

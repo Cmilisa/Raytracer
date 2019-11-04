@@ -26,6 +26,10 @@ def normalize(vec):
     return div_vec_scalar_matrices(vec, np.sqrt(dot_product(vec, vec)))
 
 
+def np_normalize(vec):
+    return vec / np.sqrt(np.dot(vec, vec))
+
+
 def div_vec_scalar_matrices(vec, a):
     temp = np.copy(vec)
     temp[:, :, 0] /= a
@@ -93,7 +97,7 @@ class Sphere:
         return np.where(dPC <= self.radius + 1, True, False)
 
     def compute_light(self, ray_dir, ray_origin, point, object_list, light_list):
-        diffuse_intensity = np.zeros((ray_dir.shape[0], ray_dir.shape[1]))
+        diffuse_intensity = np.zeros((ray_dir.shape[0], ray_dir.shape[1], 3))
         specular_intensity = 0
 
         normal = normalize(point - self.center)
@@ -142,6 +146,18 @@ class Sphere:
         return final
 
 
+def dot_test(v1, v2):
+    return v1[:, :, 0] * v2[0] + v1[:, :, 1] * v2[1] + v1[:, :, 2] * v2[2]
+
+
+def cross(v1, v2):
+    temp = np.copy(v2)
+    temp[:, :, 0] = v1[1] * v2[:, :, 2] - v1[2] * v2[:, :, 1]
+    temp[:, :, 1] = v1[2] * v2[:, :, 0] - v1[0] * v2[:, :, 2]
+    temp[:, :, 2] = v1[0] * v2[:, :, 1] - v1[1] * v2[:, :, 0]
+    return temp
+
+
 class Triangle:
     __slots__ = 'p1', 'p2', 'p3', 'normal', 'mat'
 
@@ -155,68 +171,83 @@ class Triangle:
     def compute_normal(self):  # assuming points are defined clockwise
         v1 = self.p2 - self.p1
         v2 = self.p3 - self.p1
-        self.normal = np.cross(v1, v2)
-        normalize(self.normal)
+        self.normal = np_normalize(np.cross(v1, v2))
 
         return self
 
-    """def compute_ray(self, ray_dir, ray_origin):
-        dirn = ray_dir * self.normal
+    def is_point_contained(self, point):
+        cross1 = dot_test(cross(self.p2 - self.p1, point - self.p1), self.normal)
+        cross2 = dot_test(cross(self.p3 - self.p2, point - self.p2), self.normal)
+        cross3 = dot_test(cross(self.p1 - self.p3, point - self.p3), self.normal)
+        final = np.where(cross1 <= 0, 0, 1)
+        final = final + np.where(cross2 <= 0, 0, 1)
+        final = final + np.where(cross3 <= 0, 0, 1)
+        final = np.where(final >= 3, True, False)
 
-        if (dirn) == 0:  # the ray and the triangle's plane are parrallel
-            return None
-
-        dR = (self.normal * ray_origin + self.normal * self.p1) / (dirn)  # distance of the plane along the ray direction
-
-        if dR < 0:  # if the triangle is behind the ray's origin
-            return None
-
-        point = ray_origin + ray_dir * dR  # point of intersection with the triangle's plane
-
-        if ((self.normal * cross(self.p2 - self.p1, point - self.p1)) > 0 and  # if the point of intersection is inside the triangle
-            (self.normal * cross(self.p3 - self.p2, point - self.p2)) > 0 and
-            (self.normal * cross(self.p1 - self.p3, point - self.p3)) > 0):
-            return point
-
-        return None"""
+        return final
 
     def compute_ray(self, ray_dir, ray_origin):
-        dirn = ray_dir * self.normal
-
+        #determine point of intersection with triangle plane
+        dirn = dot_test(ray_dir, self.normal)
         ret = np.where(dirn == 0, np.nan, dirn)
 
-        dR = (self.normal * ray_origin + self.normal * self.p1) / ret
+        if len(ray_origin.shape) is 1:
+            dR = (np.dot(self.normal, ray_origin) + np.dot(self.normal, self.p1)) / ret
+        else:
+            dR = (dot_test(ray_origin, self.normal) + np.dot(self.normal, self.p1)) / ret
 
-        ret = np.where(dR < 0, np.nan, ret)
+        ret = np.where(dR < 0, np.nan, dR)
+        point = ray_origin + mul_vec_scalar_matrices(ray_dir, ret)
 
-        point = ray_origin + (ray_dir * ret)
+        #is point inside triangle ?
+        cross1 = dot_test(cross(self.p2 - self.p1, point - self.p1), self.normal)
+        cross2 = dot_test(cross(self.p3 - self.p2, point - self.p2), self.normal)
+        cross3 = dot_test(cross(self.p1 - self.p3, point - self.p3), self.normal)
+        final = np.where(cross1 <= 0, 0, 1)
+        final = final + np.where(cross2 <= 0, 0, 1)
+        final = final + np.where(cross3 <= 0, 0, 1)
+        final_extended = extend_matrix(final)
+        final_extended[:, :, 0] = np.where(final_extended[:, :, 0] >= 3, point[:, :, 0], np.nan)
+        final_extended[:, :, 1] = np.where(final_extended[:, :, 1] >= 3, point[:, :, 1], np.nan)
+        final_extended[:, :, 2] = np.where(final_extended[:, :, 2] >= 3, point[:, :, 2], np.nan)
 
-        point = np.where(self.normal * np.cross(self.p2 - self.p1, point - self.p1) <= 0, np.nan, point)
-        point = np.where(self.normal * np.cross(self.p3 - self.p2, point - self.p2) <= 0, np.nan, point)
-        point = np.where(self.normal * np.cross(self.p1 - self.p3, point - self.p3) <= 0, np.nan, point)
-
-        return point
+        return final_extended
 
     def compute_light(self, ray_dir, ray_origin, point, object_list, light_list):
-        """diffuse_intensity = 0
+        diffuse_intensity = np.zeros((ray_dir.shape[0], ray_dir.shape[1], 3))
         specular_intensity = 0
 
         for l in light_list:
             p2l = normalize(l.pos - point)
-            p2lo = np.dot(p2l, self.normal)
+            p2ln = dot_test(p2l, self.normal)
 
-            reflected = normalize((self.normal * 2 * p2lo) - p2l)
-            dotted = np.dot(reflected, ray_dir) * (-1)
+            p2ln_temp = extend_matrix(p2ln)
+            reflected = normalize((self.normal * p2ln_temp * 2) - p2l)
 
-            if np.dot(self.normal, p2l) >= 0:
-                diffuse_intensity += self.mat.idiffuse * p2lo * l.diffuse_intensity
+            dotted = dot_product(reflected, ray_dir) * (-1)
 
-                if dotted >= 0:
-                    specular_intensity += l.specular_intensity * self.mat.ispecular * (dotted ** self.mat.alpha)
+            """temp = np.zeros((ray_dir.shape[0], ray_dir.shape[1]))
+            for o in object_list:
+                comp = np.where(np.isnan(o.compute_ray(p2l, point)[:, :, 0]), 1, 0)
+                temp = temp + comp
 
-        return self.mat.color * diffuse_intensity + np.array([255, 255, 255], dtype=np.int32) * specular_intensity"""
-        ret = np.where(np.isnan(point), np.array([125, 125, 125]), self.mat.color)
-        return ret
+            temp = np.where(temp > 0, 1, 0)"""
+            temp = 1
+
+            diffuse_intensity = np.where(p2ln >= 0, self.mat.idiffuse * p2ln * l.diffuse_intensity * temp, 0)
+
+            specular_intensity = np.where(p2ln >= 0, specular_intensity, 0)
+            specular_intensity = np.where(dotted >= 0, (dotted ** self.mat.alpha) * l.specular_intensity * self.mat.ispecular * temp, 0)
+
+        diffuse_temp = extend_matrix(diffuse_intensity)
+        specular_temp = extend_matrix(specular_intensity)
+
+        final = diffuse_temp * self.mat.color + specular_temp * np.array([255, 255, 255], dtype=np.int32)
+        contained = self.is_point_contained(point)
+        contained_extended = extend_matrix(contained)
+        final = np.where(contained_extended, final, np.array([0, 0, 0]))
+
+        return final
 
 
 class Background:
@@ -226,9 +257,10 @@ class Background:
         self.color = np.array(c)
 
     def compute_light(self, ray_dir, ray_origin, point, object_list, light_list):
-        print("coucou")
         return self.color
 
 
 if __name__ == "__main__":
-    print("coucou")
+    t = Triangle([-3., -1., -2.], [-1., 0., -2.], [-2., 2., -2.], [0., 0., 1.], Material())
+    rdir = np.array([[[0., 0., -1.]]])
+    print(t.compute_ray(rdir, np.array([0., 0., 0.])))

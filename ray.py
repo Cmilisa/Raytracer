@@ -3,7 +3,7 @@ import cv2
 
 from classes import *
 from render import *
-#from obj import *
+from obj import *
 
 
 # global variables
@@ -16,35 +16,34 @@ img = np.zeros((nbr_pixels_x, nbr_pixels_y, 3), dtype=np.int32)
 
 mat_list = dict()  # material dictionnary
 # mat_list["Test"] = Material('Test', Vec3(1.0, 0.5, 0.5), 1.0, 0.25, 1.0) #BGR and not RGB !!
-mat_list["Test"] = Material('Test', [255, 128, 128], 1.0, 0.25, 3.0)
-mat_list["Red"] = Material('Red', [150, 105, 200], 0.5, 0.25, 3.0)
+mat_list["Test"] = Material('Test', [255, 128, 128], 0.5, 0.25, 3.0)
+mat_list["Red"] = Material('Red', [162, 105, 255], 0.25, 0.25, 3.0)
 
 
 light_list = list() # all lights in the scene
 light_list.append(Light([0, 0, 0], 1.0, 1.0))
 
+scene_objects = list()
 
-"""monkey = Object("monkey.obj", mat_list["Test"], Vec3(0, 0, -5))
+"""monkey = Object("monkey.obj", mat_list["Test"], [0, 0, -5])
 monkey.load_faces()
-monkey_triangles = monkey.triangulate()"""
+monkey_triangles = monkey.triangulate()
+scene_objects = np.ndarray.tolist(np.append(np.asarray(scene_objects), monkey_triangles))"""
 
-"""cube = Object("cube.obj", mat_list["Test"], Vec3(-1.75,-1.5, -5))
+"""cube = Object("cube.obj", mat_list["Red"], [-1, -2, -5])
 cube.load_faces()
-cube_triangles = cube.triangulate()"""
+cube_triangles = cube.triangulate()
+scene_objects = np.ndarray.tolist(np.append(np.asarray(scene_objects), cube_triangles))"""
 
-"""sphere_list = list() #all spheres in the scene
-sphere_list.append(Sphere(Vec3(0,-5, -9), 1.0, mat_list["Test"]))
-sphere_list.append(Sphere(Vec3(0, 0, -7), 0.5, mat_list["Test"]))"""
+heart = Object("Love.obj", mat_list["Red"], [0, -40, -100])
+heart.load_faces()
+heart_triangles = heart.triangulate()
+scene_objects = np.ndarray.tolist(np.append(np.asarray(scene_objects), heart_triangles))
 
-scene_objects = list() # all objects in the scene except for lights
-#scene_objects.append(Background())
 #scene_objects.append(Sphere([0, 0, -9], 1.5, mat_list["Red"]))
 #scene_objects.append(Sphere([0, -5, -9], 2.0, mat_list["Red"]))
 #scene_objects.append(Sphere([0, 5, -9], 0.75, mat_list["Test"]))
-
-scene_objects.append(Triangle([1, 0, -7], [0, 1, -7], [0, -1, -7], [0, 0, 1], mat_list["Test"])) #triangles must be defined clockwise
-#scene_objects = np.ndarray.tolist(np.append(np.asarray(scene_objects), monkey_triangles))
-#scene_objects = np.ndarray.tolist(np.append(np.asarray(scene_objects), cube_triangles))
+#scene_objects.append(Triangle([1, -1, -7], [0, 4, -7], [0, -2, -7], [0, 0, 0], mat_list["Test"]).compute_normal()) #triangles must be defined clockwise
 
 
 def recenter(a):
