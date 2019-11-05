@@ -1,5 +1,5 @@
 from math import *
-import numpy as np
+from render import *
 
 
 class Material:
@@ -22,46 +22,6 @@ class Light:
         self.specular_intensity = ispe
 
 
-def normalize(vec):
-    return div_vec_scalar_matrices(vec, np.sqrt(dot_product(vec, vec)))
-
-
-def np_normalize(vec):
-    return vec / np.sqrt(np.dot(vec, vec))
-
-
-def div_vec_scalar_matrices(vec, a):
-    temp = np.copy(vec)
-    temp[:, :, 0] /= a
-    temp[:, :, 1] /= a
-    temp[:, :, 2] /= a
-    return temp
-
-
-def vec_norm(vec):
-    return np.sqrt(dot_product(vec, vec))
-
-
-def dot_product(v1, v2):
-    return v1[:, :, 0] * v2[:, :, 0] + v1[:, :, 1] * v2[:, :, 1] + v1[:, :, 2] * v2[:, :, 2]
-
-
-def mul_vec_scalar_matrices(v1, v2):
-    temp = np.copy(v1)
-    temp[:, :, 0] *= v2
-    temp[:, :, 1] *= v2
-    temp[:, :, 2] *= v2
-    return temp
-
-
-def extend_matrix(m):
-    temp = np.zeros((m.shape[0], m.shape[1], 3))
-    temp[:, :, 0] = m
-    temp[:, :, 1] = m
-    temp[:, :, 2] = m
-    return temp
-
-
 class Sphere:
     __slots__ = 'center', 'radius', 'mat'
 
@@ -71,91 +31,62 @@ class Sphere:
         self.mat = m
 
     def compute_ray(self, ray_dir, ray_origin):
-        AO = self.center - ray_origin  # vector from the ray origin to the sphere center
-        dAC = np.dot(ray_dir, AO)
-        # distance from the center of the sphere to its projection on the ray
-        AC = mul_vec_scalar_matrices(ray_dir, dAC)
-        CO = AO - AC
-        dOC = vec_norm(CO)
+        """Computes the points of intersection of a given ray with the Sphere object.
+        Variables with suffix v are vectors, and variables with suffix d are distances"""
+        v_origin_center = self.center - ray_origin  # vector from the ray origin to the sphere center
+        # distance between the origin and the sphere's center projection along the ray
+        dot_dir_center = np.dot(ray_dir, v_origin_center)
+        # distance between the sphere's center and its projection on the ray
+        d_center_proj = vec_norm(v_origin_center - mul_vec_scalar_matrices(ray_dir, dot_dir_center))
 
         # if the projection of the sphere center is farther than the radius, then obviously it is not in the sphere
-        dOC = np.where(dOC > self.radius, np.nan, dOC)
-        dCP = np.sqrt(self.radius * self.radius - dOC * dOC)
-        dAP = dAC - dCP
+        d_center_proj = np.where(d_center_proj > self.radius, np.nan, d_center_proj)
+        # else compute the distance between the projection point and the intersection point of the ray
+        d_proj_inter = np.sqrt(self.radius * self.radius - d_center_proj * d_center_proj)
+        # distance between the origin and the intersection point (2 possible points, we take the first one)
+        d_origin_inter = dot_dir_center - d_proj_inter
 
-        dAP = np.where(dAP < 0, dAC + dCP, dAP)
+        # if the first point is behind the camera we take the second one
+        d_origin_inter = np.where(d_origin_inter < 0, dot_dir_center + d_proj_inter, d_origin_inter)
+        # if the second one is behind, then the whole sphere is behind
+        d_origin_inter = np.where(d_origin_inter < 0, np.nan, d_origin_inter)
 
-        dAP = np.where(dAP < 0, np.nan, dAP)
-        temp = extend_matrix(dAP)
-
+        # calculate the intersection point's coordinates
+        temp = extend_matrix(d_origin_inter)
         ret = ray_origin + ray_dir * temp
+
         return ret
 
     def is_point_contained(self, point):
-        PC = self.center - point
-        dPC = vec_norm(PC)
-        return np.where(dPC <= self.radius + 1, True, False)
+        """Checks if the input point is inside the sphere, thus being a possible intersection point. Is used in
+        lighting checks"""
+        return np.where(vec_norm(self.center - point) <= self.radius + 1, True, False)
 
     def compute_light(self, ray_dir, ray_origin, point, object_list, light_list):
-        diffuse_intensity = np.zeros((ray_dir.shape[0], ray_dir.shape[1], 3))
-        specular_intensity = 0
-
+        """Computes the color of a pixel for the object given intersection points"""
+        # normal vector to the sphere in the point
         normal = normalize(point - self.center)
-        p2l = normalize(light_list[0].pos - point)
+        v_point_light = normalize(light_list[0].pos - point)
+
+        # initializing lighting variables
+        diffuse_intensity = np.zeros((ray_dir.shape[0], ray_dir.shape[1]))
+        specular_intensity = np.zeros((ray_dir.shape[0], ray_dir.shape[1]))
 
         for l in light_list:
-            temp = 1
+            d_point_light = dot_product(v_point_light, normal)
 
-            """occlu = self.center + (normal * 1.15)  # point a little outside the sphere to compensate float precision
-            dir_occlu = normalize(l.pos - occlu)"""
+            # scalar product used in specular light calculation
+            dotted = dot_product(normalize((normal * extend_matrix(d_point_light) * 2) - v_point_light), ray_dir) * (-1)
 
-            """for op in object_list:
-                pointp = op.compute_ray(occlu, dir_occlu)
+            diffuse_intensity = np.where(d_point_light >= 0, self.mat.idiffuse*d_point_light*l.diffuse_intensity, 0)
 
-                if pointp is not None:
-                    temp = 0"""
-
-            p2ln = dot_product(p2l, normal)
-
-            # reflected light ray from light source along the normal vector
-            p2ln_temp = extend_matrix(p2ln)
-            reflected = normalize((normal * p2ln_temp * 2) - p2l)
-
-            # scalar product used in specular light calculation. The ray direction is multiplied by -1 because
-            dotted = dot_product(reflected, ray_dir) * (-1)
-
-            """if dot2(normal, p2l) >= 0:
-                diffuse_intensity += self.mat.idiffuse*p2ln*l.diffuse_intensity  # diffuse intensity
-                diffuse_intensity *= temp"""
-            diffuse_intensity = np.where(p2ln >= 0, self.mat.idiffuse*p2ln*l.diffuse_intensity, 0)
-
-            """if dotted >= 0:
-                specular_intensity += l.specular_intensity*self.mat.ispecular*(dotted**self.mat.alpha)
-                specular_intensity *= temp"""
-            specular_intensity = np.where(p2ln >= 0, specular_intensity, 0)
+            specular_intensity = np.where(d_point_light >= 0, specular_intensity, 0)
             specular_intensity = np.where(dotted >= 0, (dotted**self.mat.alpha)*l.specular_intensity*self.mat.ispecular, 0)
 
-        diffuse_temp = extend_matrix(diffuse_intensity)
-        specular_temp = extend_matrix(specular_intensity)
+        final = extend_matrix(diffuse_intensity) * self.mat.color \
+                + extend_matrix(specular_intensity) * np.array([255, 255, 255], dtype=np.int32)
 
-        final = diffuse_temp * self.mat.color + specular_temp * np.array([255, 255, 255], dtype=np.int32)
-        contained = self.is_point_contained(point)
-        contained_extended = extend_matrix(contained)
-        final = np.where(contained_extended, final, np.array([0, 0, 0]))
-
-        return final
-
-
-def dot_test(v1, v2):
-    return v1[:, :, 0] * v2[0] + v1[:, :, 1] * v2[1] + v1[:, :, 2] * v2[2]
-
-
-def cross(v1, v2):
-    temp = np.copy(v2)
-    temp[:, :, 0] = v1[1] * v2[:, :, 2] - v1[2] * v2[:, :, 1]
-    temp[:, :, 1] = v1[2] * v2[:, :, 0] - v1[0] * v2[:, :, 2]
-    temp[:, :, 2] = v1[0] * v2[:, :, 1] - v1[1] * v2[:, :, 0]
-    return temp
+        return np.where(extend_matrix(self.is_point_contained(point)), final, np.array([0, 0, 0]))
 
 
 class Triangle:
@@ -168,7 +99,8 @@ class Triangle:
         self.normal = np.array(n)
         self.mat = m
 
-    def compute_normal(self):  # assuming points are defined clockwise
+    def compute_normal(self):
+        """Computes the normal of the triangle is needed. Assumes the points are defined clockwise"""
         v1 = self.p2 - self.p1
         v2 = self.p3 - self.p1
         self.normal = np_normalize(np.cross(v1, v2))
@@ -176,9 +108,11 @@ class Triangle:
         return self
 
     def is_point_contained(self, point):
-        cross1 = dot_test(cross(self.p2 - self.p1, point - self.p1), self.normal)
-        cross2 = dot_test(cross(self.p3 - self.p2, point - self.p2), self.normal)
-        cross3 = dot_test(cross(self.p1 - self.p3, point - self.p3), self.normal)
+        """Checks if the input point is inside the triangle, thus being a possible intersection point. Is used in
+        lighting checks"""
+        cross1 = dot_matrix_vec(cross(self.p2 - self.p1, point - self.p1), self.normal)
+        cross2 = dot_matrix_vec(cross(self.p3 - self.p2, point - self.p2), self.normal)
+        cross3 = dot_matrix_vec(cross(self.p1 - self.p3, point - self.p3), self.normal)
         final = np.where(cross1 <= 0, 0, 1)
         final = final + np.where(cross2 <= 0, 0, 1)
         final = final + np.where(cross3 <= 0, 0, 1)
@@ -187,80 +121,50 @@ class Triangle:
         return final
 
     def compute_ray(self, ray_dir, ray_origin):
-        #determine point of intersection with triangle plane
-        dirn = dot_test(ray_dir, self.normal)
+        """Computes the point of intersection of the ray with the triangle"""
+        # First check if the ray intersection with the triangle plane
+        # Check if the ray is parallel to the plane
+        dirn = dot_matrix_vec(ray_dir, self.normal)
         ret = np.where(dirn == 0, np.nan, dirn)
 
+        # Computes the distance along the ray of the intersection point with the plane
         if len(ray_origin.shape) is 1:
-            dR = (np.dot(self.normal, ray_origin) + np.dot(self.normal, self.p1)) / ret
+            d_ray = (np.dot(self.normal, ray_origin) + np.dot(self.normal, self.p1)) / ret
         else:
-            dR = (dot_test(ray_origin, self.normal) + np.dot(self.normal, self.p1)) / ret
+            d_ray = (dot_matrix_vec(ray_origin, self.normal) + np.dot(self.normal, self.p1)) / ret
 
-        ret = np.where(dR < 0, np.nan, dR)
+        # is the point behind the camera ?
+        ret = np.where(d_ray < 0, np.nan, d_ray)
+        # coordinates of the point of intersection
         point = ray_origin + mul_vec_scalar_matrices(ray_dir, ret)
 
-        #is point inside triangle ?
-        cross1 = dot_test(cross(self.p2 - self.p1, point - self.p1), self.normal)
-        cross2 = dot_test(cross(self.p3 - self.p2, point - self.p2), self.normal)
-        cross3 = dot_test(cross(self.p1 - self.p3, point - self.p3), self.normal)
-        final = np.where(cross1 <= 0, 0, 1)
-        final = final + np.where(cross2 <= 0, 0, 1)
-        final = final + np.where(cross3 <= 0, 0, 1)
-        final_extended = extend_matrix(final)
-        final_extended[:, :, 0] = np.where(final_extended[:, :, 0] >= 3, point[:, :, 0], np.nan)
-        final_extended[:, :, 1] = np.where(final_extended[:, :, 1] >= 3, point[:, :, 1], np.nan)
-        final_extended[:, :, 2] = np.where(final_extended[:, :, 2] >= 3, point[:, :, 2], np.nan)
-
-        return final_extended
-
-    def compute_light(self, ray_dir, ray_origin, point, object_list, light_list):
-        diffuse_intensity = np.zeros((ray_dir.shape[0], ray_dir.shape[1], 3))
-        specular_intensity = 0
-
-        for l in light_list:
-            p2l = normalize(l.pos - point)
-            p2ln = dot_test(p2l, self.normal)
-
-            p2ln_temp = extend_matrix(p2ln)
-            reflected = normalize((self.normal * p2ln_temp * 2) - p2l)
-
-            dotted = dot_product(reflected, ray_dir) * (-1)
-
-            """temp = np.zeros((ray_dir.shape[0], ray_dir.shape[1]))
-            for o in object_list:
-                comp = np.where(np.isnan(o.compute_ray(p2l, point)[:, :, 0]), 1, 0)
-                temp = temp + comp
-
-            temp = np.where(temp > 0, 1, 0)"""
-            temp = 1
-
-            diffuse_intensity = np.where(p2ln >= 0, self.mat.idiffuse * p2ln * l.diffuse_intensity * temp, 0)
-
-            specular_intensity = np.where(p2ln >= 0, specular_intensity, 0)
-            specular_intensity = np.where(dotted >= 0, (dotted ** self.mat.alpha) * l.specular_intensity * self.mat.ispecular * temp, 0)
-
-        diffuse_temp = extend_matrix(diffuse_intensity)
-        specular_temp = extend_matrix(specular_intensity)
-
-        final = diffuse_temp * self.mat.color + specular_temp * np.array([255, 255, 255], dtype=np.int32)
-        contained = self.is_point_contained(point)
-        contained_extended = extend_matrix(contained)
-        final = np.where(contained_extended, final, np.array([0, 0, 0]))
+        # is point inside triangle ?
+        final = extend_matrix(self.is_point_contained(point))
+        final[:, :, 0] = np.where(final[:, :, 0] == True, point[:, :, 0], np.nan)
+        final[:, :, 1] = np.where(final[:, :, 1] == True, point[:, :, 1], np.nan)
+        final[:, :, 2] = np.where(final[:, :, 2] == True, point[:, :, 2], np.nan)
 
         return final
 
-
-class Background:
-    __slots__ = 'color'
-
-    def __init__(self, c=[150, 200, 125]):
-        self.color = np.array(c)
-
     def compute_light(self, ray_dir, ray_origin, point, object_list, light_list):
-        return self.color
+        """Computes the color of a pixel for the object given intersection points"""
+        # initializing lighting variables
+        diffuse_intensity = np.zeros((ray_dir.shape[0], ray_dir.shape[1]))
+        specular_intensity = np.zeros((ray_dir.shape[0], ray_dir.shape[1]))
 
+        for l in light_list:
+            # this is the same method as the sphere compute_light method
+            v_point_light = normalize(l.pos - point)
+            d_point_light = dot_matrix_vec(v_point_light, self.normal)
 
-if __name__ == "__main__":
-    t = Triangle([-3., -1., -2.], [-1., 0., -2.], [-2., 2., -2.], [0., 0., 1.], Material())
-    rdir = np.array([[[0., 0., -1.]]])
-    print(t.compute_ray(rdir, np.array([0., 0., 0.])))
+            dotted = dot_product(normalize((self.normal * extend_matrix(d_point_light) * 2) - v_point_light), ray_dir) * (-1)
+
+            diffuse_intensity = np.where(d_point_light >= 0, self.mat.idiffuse * d_point_light * l.diffuse_intensity, 0)
+
+            specular_intensity = np.where(d_point_light >= 0, specular_intensity, 0)
+            specular_intensity = np.where(dotted >= 0, (dotted ** self.mat.alpha) * l.specular_intensity * self.mat.ispecular, 0)
+
+        final = extend_matrix(diffuse_intensity) * self.mat.color \
+                + extend_matrix(specular_intensity) * np.array([255, 255, 255], dtype=np.int32)
+
+        return np.where(extend_matrix(self.is_point_contained(point)), final, np.array([0, 0, 0]))
